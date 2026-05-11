@@ -1,12 +1,14 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { m } from "$i18n/messages.js";
+  import { Button } from "$lib/components/ui/button";
   import * as Form from "$lib/components/ui/form";
   import type { EventReporter } from "$lib/components/ui/form/form-root.svelte";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import { Passkey } from "$lib/components/ui/passkey";
   import type { PasskeyState } from "$lib/components/ui/passkey/state.svelte";
+  import { Text } from "$lib/components/ui/typography";
   import { ROUTES } from "$lib/const/routes";
   import logger from "$lib/logger";
   import {
@@ -21,6 +23,7 @@
   import { zod4Client as zodClient } from "sveltekit-superforms/adapters";
   import { superForm } from "sveltekit-superforms/client";
   import { formSchema, type FormSchema } from "./schema";
+  import { z } from "zod";
   import { onMount } from "svelte";
   import { UnifiedAppointmentCrypto } from "$lib/client/appointment-crypto";
   import { resolve } from "$app/paths";
@@ -49,7 +52,9 @@
     onResult: async (event) => {
       if (event.result.type === "success") {
         toast.success(m["setupPasskey.success"]());
-        await storeStaffKeyPair();
+        if ($formData.type === "passkey") {
+          await storeStaffKeyPair();
+        }
         await goto(resolve(ROUTES.LOGIN));
       } else {
         toast.error(m["setupPasskey.error"]());
@@ -64,11 +69,31 @@
   const passkeyLoading: Writable<PasskeyState> = writable("initial");
 
   const setProperPasskeyState = () => {
-    const isOk = formSchema.shape.email.safeParse($formData.email).success;
+    const isOk = z.string().email().safeParse($formData.email).success;
     if (isOk) {
       $passkeyLoading = "click";
     } else {
       $passkeyLoading = "initial";
+    }
+  };
+
+  const onToggle = () => {
+    if ($formData.type === "passkey") {
+      $formData = {
+        ...$formData,
+        type: "passphrase",
+        passphrase: "",
+      };
+    } else {
+      $formData = {
+        ...$formData,
+        type: "passkey",
+        id: "",
+        attestationObjectBase64: "",
+        clientDataJSONBase64: "",
+        challenge: "",
+      };
+      setProperPasskeyState();
     }
   };
 
@@ -165,6 +190,7 @@
       const clientDataJSONBase64 = arrayBufferToBase64(clientDataJSONResp);
       $formData = {
         ...$formData,
+        type: "passkey",
         id: passkeyResp.id,
         attestationObjectBase64,
         clientDataJSONBase64,
@@ -180,6 +206,9 @@
   };
 
   onMount(() => {
+    // Default to passkey flow until user toggles
+    $formData.type = $formData.type ?? "passkey";
+
     const navState = history.state["sveltekit:states"];
     if (navState?.id && navState?.email) {
       $formData = {
@@ -223,6 +252,13 @@
 </script>
 
 <Form.Root {formId} {enhance}>
+  <Form.Field {form} name="type" class="hidden">
+    <Form.Control>
+      {#snippet children({ props })}
+        <Input {...props} bind:value={$formData.type} type="hidden" />
+      {/snippet}
+    </Form.Control>
+  </Form.Field>
   <Form.Field {form} name="email">
     <Form.Control>
       {#snippet children({ props })}
@@ -232,43 +268,76 @@
     </Form.Control>
     <Form.FieldErrors />
   </Form.Field>
-  <div>
-    <Form.Field {form} name="userId" class="hidden">
+  <Form.Field {form} name="userId" class="hidden">
+    <Form.Control>
+      {#snippet children({ props })}
+        <Input {...props} bind:value={$formData.userId} type="hidden" />
+      {/snippet}
+    </Form.Control>
+  </Form.Field>
+
+  {#if $formData.type === "passphrase"}
+    <Form.Field {form} name="passphrase">
       <Form.Control>
         {#snippet children({ props })}
-          <Input {...props} bind:value={$formData.userId} type="hidden" />
+          <Form.Label>{m["form.passphrase"]()}</Form.Label>
+          <Input
+            {...props}
+            bind:value={$formData.passphrase}
+            type="password"
+            minlength={30}
+            maxlength={100}
+          />
         {/snippet}
       </Form.Control>
+      <Form.FieldErrors />
+      <Form.Description>
+        {m["login.or"]()}
+        <Button variant="link" size="sm" onclick={onToggle} class="text-inherit">
+          {m["login.usePasskey"]()}
+        </Button>
+      </Form.Description>
     </Form.Field>
-    <Form.Field {form} name="id" class="hidden">
-      <Form.Control>
-        {#snippet children({ props })}
-          <Input {...props} bind:value={$formData.id} type="hidden" />
-        {/snippet}
-      </Form.Control>
-    </Form.Field>
-    <Form.Field {form} name="attestationObjectBase64" class="hidden">
-      <Form.Control>
-        {#snippet children({ props })}
-          <Input {...props} bind:value={$formData.attestationObjectBase64} type="hidden" />
-        {/snippet}
-      </Form.Control>
-    </Form.Field>
-    <Form.Field {form} name="clientDataJSONBase64" class="hidden">
-      <Form.Control>
-        {#snippet children({ props })}
-          <Input {...props} bind:value={$formData.clientDataJSONBase64} type="hidden" />
-        {/snippet}
-      </Form.Control>
-    </Form.Field>
-    <Form.Field {form} name="challenge" class="hidden">
-      <Form.Control>
-        {#snippet children({ props })}
-          <Input {...props} bind:value={$formData.challenge} type="hidden" />
-        {/snippet}
-      </Form.Control>
-    </Form.Field>
-    <Label class="mb-2">{m["form.passkey"]()}</Label>
-    <Passkey.State state={$passkeyLoading} onclick={onSetPasskey} />
-  </div>
+  {/if}
+
+  {#if $formData.type === "passkey"}
+    <div>
+      <Form.Field {form} name="id" class="hidden">
+        <Form.Control>
+          {#snippet children({ props })}
+            <Input {...props} bind:value={$formData.id} type="hidden" />
+          {/snippet}
+        </Form.Control>
+      </Form.Field>
+      <Form.Field {form} name="attestationObjectBase64" class="hidden">
+        <Form.Control>
+          {#snippet children({ props })}
+            <Input {...props} bind:value={$formData.attestationObjectBase64} type="hidden" />
+          {/snippet}
+        </Form.Control>
+      </Form.Field>
+      <Form.Field {form} name="clientDataJSONBase64" class="hidden">
+        <Form.Control>
+          {#snippet children({ props })}
+            <Input {...props} bind:value={$formData.clientDataJSONBase64} type="hidden" />
+          {/snippet}
+        </Form.Control>
+      </Form.Field>
+      <Form.Field {form} name="challenge" class="hidden">
+        <Form.Control>
+          {#snippet children({ props })}
+            <Input {...props} bind:value={$formData.challenge} type="hidden" />
+          {/snippet}
+        </Form.Control>
+      </Form.Field>
+      <Label class="mb-2">{m["form.passkey"]()}</Label>
+      <Passkey.State state={$passkeyLoading} onclick={onSetPasskey} />
+      <Text style="xs" color="medium" class="mt-1 ml-1 leading-none">
+        {m["login.or"]()}
+        <Button variant="link" size="sm" onclick={onToggle} class="text-inherit">
+          {m["login.usePassphrase"]()}
+        </Button>.
+      </Text>
+    </div>
+  {/if}
 </Form.Root>

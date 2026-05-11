@@ -24,12 +24,14 @@ export const actions: Actions = {
       });
     }
 
-    const resp = await event.fetch(`/api/auth/register/${form.data.userId}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    let body: Record<string, unknown>;
+    if (form.data.type === "passphrase") {
+      body = {
+        email: form.data.email,
+        passphrase: form.data.passphrase,
+      };
+    } else {
+      body = {
         email: form.data.email,
         challenge: form.data.challenge, // Send original registration challenge
         passkey: {
@@ -38,7 +40,15 @@ export const actions: Actions = {
           clientDataJSON: form.data.clientDataJSONBase64,
           deviceName: "Unknown Device",
         },
-      }),
+      };
+    }
+
+    const resp = await event.fetch(`/api/auth/register/${form.data.userId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     });
 
     if (resp.status < 400) {
@@ -46,8 +56,8 @@ export const actions: Actions = {
     } else {
       let error = "Unknown error";
       try {
-        const body = await resp.json();
-        error = body.error;
+        const respBody = await resp.json();
+        error = respBody.error;
       } catch (e) {
         log.error("Failed to parse setup passkey error response", { error: e });
       }

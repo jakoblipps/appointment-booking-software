@@ -6,6 +6,7 @@ import type { RequestHandler } from "./$types";
 import { registerOpenAPIRoute } from "$lib/server/openapi";
 import logger from "$lib/logger";
 import { AppointmentService } from "$lib/server/services/appointment-service";
+import { hashPassphrase } from "$lib/server/utils/passphrase";
 
 // Register OpenAPI documentation
 registerOpenAPIRoute("/auth/register", "POST", {
@@ -104,8 +105,36 @@ export const POST: RequestHandler = async ({ params, cookies, request, url }) =>
     }
 
     // Validate that either passphrase or passkey is provided
-    if (!body.passkey) {
-      throw new ValidationError("Passphrase must be provided");
+    if (!body.passkey && !body.passphrase) {
+      throw new ValidationError("Passphrase or passkey must be provided");
+    }
+
+    // Passphrase-only registration path (no WebAuthn / PRF / crypto keypair).
+    // The tenant admin can register a passkey later from the security profile.
+    if (body.passphrase && !body.passkey) {
+      if (typeof body.passphrase !== "string" || body.passphrase.length < 30) {
+        throw new ValidationError("Passphrase must be at least 30 characters");
+      }
+
+      const targetUser = await UserService.getUserById(userId);
+      if (targetUser.email !== body.email) {
+        throw new ValidationError("User mismatch");
+      }
+
+      const passphraseHash = await hashPassphrase(body.passphrase);
+      await UserService.updateUser(userId, {
+        passphraseHash,
+        confirmationState: "ACCESS_GRANTED",
+      });
+
+      log.debug("Passphrase set for user account", { userId });
+
+      return json(
+        {
+          message: "User account now has a passphrase.",
+        },
+        { status: 201 },
+      );
     }
 
     // Add the passkey to the user account if provided
